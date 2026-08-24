@@ -19,6 +19,7 @@ let scanTimer = null;
 
 const $ = (selector) => document.querySelector(selector);
 const itemList = $('#itemList');
+const statusLabels = { storage: '保管', display: '展示', 'in-use': '使用中', good: '保管', attention: '保管' };
 
 function saveItems() {
   localStorage.setItem(storageKey, JSON.stringify(items));
@@ -47,7 +48,7 @@ function render() {
   $('#locationFilter').value = locations().includes(selectedLocation) ? selectedLocation : 'all';
   $('#locationCodeButton').hidden = $('#locationFilter').value === 'all';
   const visible = filteredItems();
-  itemList.innerHTML = visible.map((item) => `<article class="item-card">${item.image ? `<img class="item-image" src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name)}">` : ''}<div><div class="item-code">${escapeHtml(item.code)}</div><div class="item-name">${escapeHtml(item.name)}</div><div class="item-location">⌖ ${escapeHtml(item.location)}</div>${item.memo ? `<div class="item-memo">中身：${escapeHtml(item.memo)}</div>` : ''}</div><div class="item-right"><span class="status status-good">使用可能</span><button class="code-item" data-id="${item.id}" type="button">コード出力</button><button class="delete-item" data-id="${item.id}" type="button">削除</button></div></article>`).join('');
+  itemList.innerHTML = visible.map((item) => `<article class="item-card">${item.image ? `<img class="item-image" src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name)}">` : ''}<div><div class="item-code">${escapeHtml(item.code)}</div><div class="item-name">${escapeHtml(item.name)}</div><div class="item-location">⌖ ${escapeHtml(item.location)}</div>${item.memo ? `<div class="item-memo">中身：${escapeHtml(item.memo)}</div>` : ''}</div><div class="item-right"><span class="status status-good">${statusLabels[item.status] || '保管'}</span><button class="code-item" data-id="${item.id}" type="button">コード出力</button><button class="delete-item" data-id="${item.id}" type="button">削除</button></div></article>`).join('');
   $('#emptyState').hidden = items.length > 0 || visible.length > 0;
   if (items.length > 0 && visible.length === 0) { itemList.innerHTML = '<div class="empty-state"><h3>該当するアイテムがありません</h3><p>検索条件や場所の絞り込みを確認してください。</p></div>'; $('#emptyState').hidden = true; }
 }
@@ -133,7 +134,7 @@ function openCodeModal(item) {
 }
 function openLocationCodeModal(location) {
   $('#codeTitle').textContent = location;
-  $('#codeCaption').textContent = `この場所の登録アイテム：${items.filter((item) => item.location === location).length}件`;
+  $('#codeCaption').textContent = `この場所の所持品：${items.filter((item) => item.location === location).length}件`;
   $('#qrOutput').innerHTML = '';
   $('#barcodeOutput').innerHTML = '';
   if (window.QRCode) new QRCode($('#qrOutput'), { text: location, width: 170, height: 170, correctLevel: QRCode.CorrectLevel.M });
@@ -159,7 +160,7 @@ $('#emptyAddButton').addEventListener('click', () => { $('#itemForm').reset(); o
 document.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => closeModal(`#${button.dataset.close}`)));
 document.querySelectorAll('.filter-tab').forEach((tab) => tab.addEventListener('click', () => { activeFilter = tab.dataset.filter; document.querySelectorAll('.filter-tab').forEach((button) => button.classList.toggle('is-active', button === tab)); render(); }));
 itemList.addEventListener('click', async (event) => { const codeButton = event.target.closest('.code-item'); if (codeButton) { const item = items.find((entry) => entry.id === Number(codeButton.dataset.id)); if (item) openCodeModal(item); return; } const button = event.target.closest('.delete-item'); if (!button) return; const itemId = Number(button.dataset.id); deletedItemIds.add(String(itemId)); localStorage.setItem(deletedKey, JSON.stringify([...deletedItemIds])); items = items.filter((item) => item.id !== itemId); localStorage.setItem(storageKey, JSON.stringify(items)); render(); if (cloudUser && cloudItems) { cloudWriteQueue = cloudWriteQueue.then(() => cloudItems.doc(String(itemId)).delete()).catch(() => showToast('クラウドから削除できませんでした')); await cloudWriteQueue; } showToast('アイテムを削除しました'); });
-$('#itemForm').addEventListener('submit', async (event) => { event.preventDefault(); const data = new FormData(event.target); const id = Date.now(); const file = data.get('image'); try { const image = file?.size ? await readImage(file) : ''; items.unshift({ id, name: data.get('name').trim(), location: data.get('location').trim(), code: data.get('code').trim() || `STOCK-${id}`, status: 'good', image, memo: data.get('memo').trim() }); saveItems(); closeModal('#formModal'); render(); showToast('アイテムを登録しました'); } catch (error) { showToast('画像を保存できませんでした。小さい画像で試してください'); } });
+$('#itemForm').addEventListener('submit', async (event) => { event.preventDefault(); const data = new FormData(event.target); const id = Date.now(); const file = data.get('image'); try { const image = file?.size ? await readImage(file) : ''; items.unshift({ id, name: data.get('name').trim(), location: data.get('location').trim(), code: data.get('code').trim() || `STOCK-${id}`, status: data.get('status') || 'storage', image, memo: data.get('memo').trim() }); saveItems(); closeModal('#formModal'); render(); showToast('アイテムを登録しました'); } catch (error) { showToast('画像を保存できませんでした。小さい画像で試してください'); } });
 function readImage(file) { return new Promise((resolve, reject) => { const image = new Image(); const reader = new FileReader(); reader.onload = () => { image.onload = () => { const scale = Math.min(1, 1280 / Math.max(image.naturalWidth, image.naturalHeight)); const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale)); canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height); resolve(canvas.toDataURL('image/jpeg', 0.75)); }; image.onerror = reject; image.src = reader.result; }; reader.onerror = reject; reader.readAsDataURL(file); }); }
 document.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('#searchInput').focus(); } if (event.key === 'Escape') { closeModal('#formModal'); closeModal('#scannerModal'); } });
 render();
