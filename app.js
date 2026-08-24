@@ -46,11 +46,11 @@ function render() {
   $('#allCount').textContent = items.length;
   $('#locationCount').textContent = locations().length;
   const selectedLocation = $('#locationFilter').value;
-  $('#locationFilter').innerHTML = '<option value="all">場所：すべて</option>' + locations().map((location) => `<option value="${escapeHtml(location)}">${escapeHtml(location)}</option>`).join('');
+  $('#locationFilter').innerHTML = '<option value="all">保管場所：すべて</option>' + locations().map((location) => `<option value="${escapeHtml(location)}">${escapeHtml(location)}</option>`).join('');
   $('#locationFilter').value = locations().includes(selectedLocation) ? selectedLocation : 'all';
   $('#locationCodeButton').hidden = $('#locationFilter').value === 'all';
   const visible = filteredItems();
-  itemList.innerHTML = visible.map((item) => `<article class="item-card">${item.image ? `<img class="item-image" src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name)}">` : ''}<div><div class="item-code">${escapeHtml(item.code)}</div><div class="item-name">${escapeHtml(item.name)}</div><div class="item-location">⌖ ${escapeHtml(item.location)}</div>${item.memo ? `<div class="item-memo">中身：${escapeHtml(item.memo)}</div>` : ''}</div><div class="item-right"><span class="status status-good">${statusLabels[item.status] || '保管'}</span><button class="edit-item" data-id="${item.id}" type="button">編集</button><button class="code-item" data-id="${item.id}" type="button">コード出力</button><button class="delete-item" data-id="${item.id}" type="button">削除</button></div></article>`).join('');
+  itemList.innerHTML = visible.map((item) => `<article class="item-card">${item.image ? `<img class="item-image" src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name)}">` : ''}<div><div class="item-code">${escapeHtml(item.code)}</div><div class="item-name">${escapeHtml(item.name)}</div><div class="item-location">⌖ ${escapeHtml(item.location)}</div>${item.memo ? `<div class="item-memo">中身：${escapeHtml(item.memo)}</div>` : ''}</div><div class="item-right"><span class="status status-good">${statusLabels[item.status] || '保管'}</span><button class="edit-item" data-id="${item.id}" type="button">編集</button><button class="delete-item" data-id="${item.id}" type="button">削除</button></div></article>`).join('');
   $('#emptyState').hidden = items.length > 0 || visible.length > 0;
   if (items.length > 0 && visible.length === 0) { itemList.innerHTML = '<div class="empty-state"><h3>該当するアイテムがありません</h3><p>検索条件や場所の絞り込みを確認してください。</p></div>'; $('#emptyState').hidden = true; }
 }
