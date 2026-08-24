@@ -8,6 +8,7 @@ const storageKey = 'stockroom-items';
 let items = JSON.parse(localStorage.getItem(storageKey) || 'null') || seedItems;
 let cloudUser = null;
 let cloudItems = null;
+let cloudWriteQueue = Promise.resolve();
 let activeFilter = 'all';
 let stream = null;
 let detector = null;
@@ -19,7 +20,8 @@ const itemList = $('#itemList');
 function saveItems() {
   localStorage.setItem(storageKey, JSON.stringify(items));
   if (!cloudUser || !cloudItems) return;
-  Promise.all(items.map((item) => cloudItems.doc(String(item.id)).set(item))).catch(() => showToast('クラウド保存に失敗しました'));
+  const itemsToSave = [...items];
+  cloudWriteQueue = cloudWriteQueue.then(() => Promise.all(itemsToSave.map((item) => cloudItems.doc(String(item.id)).set(item)))).catch(() => showToast('クラウド保存に失敗しました'));
 }
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
 function locations() { return [...new Set(items.map((item) => item.location))].sort(); }
@@ -139,7 +141,7 @@ $('#addButton').addEventListener('click', () => { $('#itemForm').reset(); openMo
 $('#emptyAddButton').addEventListener('click', () => { $('#itemForm').reset(); openModal('#formModal'); });
 document.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => closeModal(`#${button.dataset.close}`)));
 document.querySelectorAll('.filter-tab').forEach((tab) => tab.addEventListener('click', () => { activeFilter = tab.dataset.filter; document.querySelectorAll('.filter-tab').forEach((button) => button.classList.toggle('is-active', button === tab)); render(); }));
-itemList.addEventListener('click', async (event) => { const codeButton = event.target.closest('.code-item'); if (codeButton) { const item = items.find((entry) => entry.id === Number(codeButton.dataset.id)); if (item) openCodeModal(item); return; } const button = event.target.closest('.delete-item'); if (!button) return; const itemId = Number(button.dataset.id); items = items.filter((item) => item.id !== itemId); localStorage.setItem(storageKey, JSON.stringify(items)); render(); if (cloudUser && cloudItems) { try { await cloudItems.doc(String(itemId)).delete(); } catch (error) { showToast('クラウドから削除できませんでした'); return; } } showToast('アイテムを削除しました'); });
+itemList.addEventListener('click', async (event) => { const codeButton = event.target.closest('.code-item'); if (codeButton) { const item = items.find((entry) => entry.id === Number(codeButton.dataset.id)); if (item) openCodeModal(item); return; } const button = event.target.closest('.delete-item'); if (!button) return; const itemId = Number(button.dataset.id); items = items.filter((item) => item.id !== itemId); localStorage.setItem(storageKey, JSON.stringify(items)); render(); if (cloudUser && cloudItems) { cloudWriteQueue = cloudWriteQueue.then(() => cloudItems.doc(String(itemId)).delete()).catch(() => showToast('クラウドから削除できませんでした')); await cloudWriteQueue; } showToast('アイテムを削除しました'); });
 $('#itemForm').addEventListener('submit', async (event) => { event.preventDefault(); const data = new FormData(event.target); const id = Date.now(); const file = data.get('image'); try { const image = file?.size ? await readImage(file) : ''; items.unshift({ id, name: data.get('name').trim(), location: data.get('location').trim(), code: data.get('code').trim() || `STOCK-${id}`, status: 'good', image, memo: data.get('memo').trim() }); saveItems(); closeModal('#formModal'); render(); showToast('アイテムを登録しました'); } catch (error) { showToast('画像を保存できませんでした。小さい画像で試してください'); } });
 function readImage(file) { return new Promise((resolve, reject) => { const image = new Image(); const reader = new FileReader(); reader.onload = () => { image.onload = () => { const scale = Math.min(1, 1280 / Math.max(image.naturalWidth, image.naturalHeight)); const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale)); canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height); resolve(canvas.toDataURL('image/jpeg', 0.75)); }; image.onerror = reject; image.src = reader.result; }; reader.onerror = reject; reader.readAsDataURL(file); }); }
 document.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('#searchInput').focus(); } if (event.key === 'Escape') { closeModal('#formModal'); closeModal('#scannerModal'); } });
