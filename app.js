@@ -18,6 +18,7 @@ let activeFilter = 'all';
 let stream = null;
 let detector = null;
 let scanTimer = null;
+let scanCanvas = null;
 
 const $ = (selector) => document.querySelector(selector);
 const itemList = $('#itemList');
@@ -61,21 +62,37 @@ function closeModal(id) { $(id).hidden = true; if (id === '#scannerModal') stopS
 async function startScanner() {
   openModal('#scannerModal');
   $('#scannerStatus').textContent = 'カメラを起動しています…';
-  if (!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia) { $('#scannerStatus').textContent = 'このブラウザではカメラ読み取りに対応していません。手入力をご利用ください。'; return; }
+  if (!navigator.mediaDevices?.getUserMedia) { $('#scannerStatus').textContent = 'カメラを利用できません。手入力をご利用ください。'; return; }
   try {
-    const supported = await BarcodeDetector.getSupportedFormats();
-    const formats = ['qr_code', 'ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a'].filter((format) => supported.includes(format));
-    detector = new BarcodeDetector({ formats });
+    if ('BarcodeDetector' in window) {
+      const supported = await BarcodeDetector.getSupportedFormats();
+      const formats = ['qr_code', 'ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a'].filter((format) => supported.includes(format));
+      detector = formats.length ? new BarcodeDetector({ formats }) : null;
+    }
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
     $('#cameraVideo').srcObject = stream;
-    $('#scannerStatus').textContent = '読み取り待機中';
+    scanCanvas = document.createElement('canvas');
+    $('#scannerStatus').textContent = detector || window.jsQR ? 'QRコードをカメラに映してください' : 'このブラウザではカメラ読み取りに対応していません。手入力をご利用ください。';
     scanTimer = setInterval(scanFrame, 350);
   } catch (error) { $('#scannerStatus').textContent = 'カメラを利用できません。手入力をご利用ください。'; }
 }
 async function scanFrame() {
   const video = $('#cameraVideo');
-  if (!detector || video.readyState < 2) return;
-  try { const codes = await detector.detect(video); if (codes.length) handleCode(codes[0].rawValue); } catch (error) { /* camera frame can fail while loading */ }
+  if (video.readyState < 2) return;
+  try {
+    if (detector) { const codes = await detector.detect(video); if (codes.length) handleCode(codes[0].rawValue); return; }
+    if (window.jsQR && scanCanvas) {
+      const width = video.videoWidth;
+      const height = video.videoHeight;
+      if (!width || !height) return;
+      scanCanvas.width = width;
+      scanCanvas.height = height;
+      const context = scanCanvas.getContext('2d', { willReadFrequently: true });
+      context.drawImage(video, 0, 0, width, height);
+      const result = jsQR(context.getImageData(0, 0, width, height).data, width, height);
+      if (result) handleCode(result.data);
+    }
+  } catch (error) { /* camera frame can fail while loading */ }
 }
 function handleCode(code) {
   stopScanner(); closeModal('#scannerModal'); $('#searchInput').value = code; activeFilter = 'all'; document.querySelectorAll('.filter-tab').forEach((tab) => tab.classList.toggle('is-active', tab.dataset.filter === 'all')); render();
