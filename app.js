@@ -32,7 +32,7 @@ function saveItems() {
 }
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
 function locations() { return [...new Set(items.map((item) => item.location))].sort(); }
-function locationCode(location) { let hash = 0; for (const character of location) hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0; return `LOC-${Math.abs(hash).toString(36).toUpperCase()}`; }
+function locationCode(location) { let hash = 0; for (const character of location) hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0; return `LOC-${(Math.abs(hash) % 1000000).toString().padStart(6, '0')}`; }
 function filteredItems() {
   const query = $('#searchInput').value.trim().toLowerCase();
   const location = $('#locationFilter').value;
@@ -155,7 +155,7 @@ function openCodeModal(item) {
 function openLocationCodeModal(location) {
   $('#codeTitle').textContent = location;
   const code = locationCode(location);
-  $('#codeCaption').textContent = `${location} / ${code} / この場所の所持品：${items.filter((item) => item.location === location).length}件`;
+  $('#codeCaption').textContent = `保管場所番号：${code} / ${location} / 所持品：${items.filter((item) => item.location === location).length}件`;
   $('#qrOutput').innerHTML = '';
   $('#barcodeOutput').innerHTML = '';
   if (window.QRCode) new QRCode($('#qrOutput'), { text: code, width: 170, height: 170, correctLevel: QRCode.CorrectLevel.M });
