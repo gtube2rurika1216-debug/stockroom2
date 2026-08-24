@@ -10,6 +10,7 @@ let items = JSON.parse(localStorage.getItem(storageKey) || 'null') || seedItems;
 let cloudUser = null;
 let cloudItems = null;
 let cloudWriteQueue = Promise.resolve();
+let stopCloudSync = null;
 let deletedItemIds = new Set(JSON.parse(localStorage.getItem(deletedKey) || '[]'));
 let activeFilter = 'all';
 let stream = null;
@@ -105,9 +106,18 @@ async function initializeCloudSync() {
       deletedItemIds.clear();
       localStorage.setItem(deletedKey, '[]');
     }
-    const snapshot = await cloudItems.get();
-    if (!snapshot.empty) { items = snapshot.docs.map((doc) => doc.data()); localStorage.setItem(storageKey, JSON.stringify(items)); render(); }
-    else { saveItems(); }
+    if (stopCloudSync) stopCloudSync();
+    let firstSnapshot = true;
+    stopCloudSync = cloudItems.onSnapshot((snapshot) => {
+      if (!snapshot.empty) {
+        items = snapshot.docs.map((doc) => doc.data());
+        localStorage.setItem(storageKey, JSON.stringify(items));
+        render();
+      } else if (firstSnapshot && items.length) {
+        saveItems();
+      }
+      firstSnapshot = false;
+    }, () => showToast('クラウド同期に失敗しました'));
   });
 }
 function openCodeModal(item) {
