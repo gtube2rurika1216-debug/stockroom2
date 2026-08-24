@@ -83,7 +83,13 @@ async function initializeCloudSync() {
   firebase.initializeApp(config);
   const auth = firebase.auth();
   $('#loginButton').hidden = false;
-  $('#loginButton').addEventListener('click', () => auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(() => showToast('ログインできませんでした')));
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  $('#loginButton').addEventListener('click', () => {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    const login = isMobile ? auth.signInWithRedirect(provider) : auth.signInWithPopup(provider);
+    login.catch((error) => showToast(`ログインできませんでした（${error.code || '認証エラー'}）`));
+  });
+  auth.getRedirectResult().catch((error) => showToast(`ログインできませんでした（${error.code || '認証エラー'}）`));
   auth.onAuthStateChanged(async (user) => {
     cloudUser = user;
     if (!user) { $('#syncStatus').textContent = 'ログインして共有'; $('#loginButton').textContent = 'Googleでログイン'; return; }
@@ -134,8 +140,8 @@ $('#emptyAddButton').addEventListener('click', () => { $('#itemForm').reset(); o
 document.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => closeModal(`#${button.dataset.close}`)));
 document.querySelectorAll('.filter-tab').forEach((tab) => tab.addEventListener('click', () => { activeFilter = tab.dataset.filter; document.querySelectorAll('.filter-tab').forEach((button) => button.classList.toggle('is-active', button === tab)); render(); }));
 itemList.addEventListener('click', (event) => { const codeButton = event.target.closest('.code-item'); if (codeButton) { const item = items.find((entry) => entry.id === Number(codeButton.dataset.id)); if (item) openCodeModal(item); return; } const button = event.target.closest('.delete-item'); if (!button) return; items = items.filter((item) => item.id !== Number(button.dataset.id)); saveItems(); render(); showToast('アイテムを削除しました'); });
-$('#itemForm').addEventListener('submit', async (event) => { event.preventDefault(); const data = new FormData(event.target); const id = Date.now(); const file = data.get('image'); const image = file?.size ? await readImage(file) : ''; items.unshift({ id, name: data.get('name').trim(), location: data.get('location').trim(), code: data.get('code').trim() || `STOCK-${id}`, status: 'good', image, memo: data.get('memo').trim() }); saveItems(); closeModal('#formModal'); render(); showToast('アイテムを登録しました'); });
-function readImage(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); }); }
+$('#itemForm').addEventListener('submit', async (event) => { event.preventDefault(); const data = new FormData(event.target); const id = Date.now(); const file = data.get('image'); try { const image = file?.size ? await readImage(file) : ''; items.unshift({ id, name: data.get('name').trim(), location: data.get('location').trim(), code: data.get('code').trim() || `STOCK-${id}`, status: 'good', image, memo: data.get('memo').trim() }); saveItems(); closeModal('#formModal'); render(); showToast('アイテムを登録しました'); } catch (error) { showToast('画像を保存できませんでした。小さい画像で試してください'); } });
+function readImage(file) { return new Promise((resolve, reject) => { const image = new Image(); const reader = new FileReader(); reader.onload = () => { image.onload = () => { const scale = Math.min(1, 1280 / Math.max(image.naturalWidth, image.naturalHeight)); const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale)); canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height); resolve(canvas.toDataURL('image/jpeg', 0.75)); }; image.onerror = reject; image.src = reader.result; }; reader.onerror = reject; reader.readAsDataURL(file); }); }
 document.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('#searchInput').focus(); } if (event.key === 'Escape') { closeModal('#formModal'); closeModal('#scannerModal'); } });
 render();
 initializeCloudSync();
