@@ -1,19 +1,10 @@
-const seedItems = [
-  { id: 1, name: '防災リュック', location: '玄関収納・下段', code: '4901234567890', status: 'good', memo: '水・ライト入り' },
-  { id: 2, name: 'HDMIケーブル 2m', location: '書斎・右の引き出し', code: 'QR-HDMI-002', status: 'attention', memo: '予備。動作確認が必要' },
-  { id: 3, name: '冬用の寝袋', location: '納戸・上段', code: '8809876543210', status: 'good', memo: '青い収納袋' }
-];
-
-const storageKey = 'stockroom-items';
-const deletedKey = 'stockroom-deleted-items';
-let items = JSON.parse(localStorage.getItem(storageKey) || 'null') || seedItems;
+let items = [];
 let cloudUser = null;
 let cloudItems = null;
 let cloudWriteQueue = Promise.resolve();
 let stopCloudSync = null;
 let editingItemId = null;
 let editingImage = '';
-let deletedItemIds = new Set(JSON.parse(localStorage.getItem(deletedKey) || '[]'));
 let activeFilter = 'all';
 let stream = null;
 let detector = null;
@@ -26,10 +17,10 @@ const itemList = $('#itemList');
 const statusLabels = { storage: '保管', display: '展示', 'in-use': '使用中', good: '保管', attention: '保管' };
 
 function saveItems(itemsToSave = items) {
-  localStorage.setItem(storageKey, JSON.stringify(itemsToSave));
-  if (!cloudUser || !cloudItems) return;
+  if (!cloudUser || !cloudItems) return Promise.reject(new Error('Firebase login required'));
   const cloudItemsToSave = [...itemsToSave];
-  cloudWriteQueue = cloudWriteQueue.then(() => Promise.all(cloudItemsToSave.map((item) => cloudItems.doc(String(item.id)).set(item)))).catch(() => showToast('クラウド保存に失敗しました'));
+  cloudWriteQueue = cloudWriteQueue.then(() => Promise.all(cloudItemsToSave.map((item) => cloudItems.doc(String(item.id)).set(item))));
+  return cloudWriteQueue.catch(() => showToast('Firebaseへの保存に失敗しました'));
 }
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
 function locations() { return [...new Set(items.map((item) => item.location))].sort(); }
@@ -130,25 +121,17 @@ async function initializeCloudSync() {
   auth.getRedirectResult().catch((error) => showToast(`ログインできませんでした（${error.code || '認証エラー'}）`));
   auth.onAuthStateChanged(async (user) => {
     cloudUser = user;
-    if (!user) { $('#syncStatus').textContent = 'ログインして共有'; $('#loginButton').textContent = 'Googleでログイン'; return; }
+    if (!user) { items = []; render(); $('#syncStatus').textContent = 'ログインが必要です'; $('#loginButton').textContent = 'Googleでログイン'; return; }
     $('#syncStatus').textContent = `${user.displayName || user.email} と同期中`;
     $('#loginButton').textContent = 'ログイン済み';
     cloudItems = firebase.firestore().collection('users').doc(user.uid).collection('items');
-    if (deletedItemIds.size) {
-      await Promise.all([...deletedItemIds].map((itemId) => cloudItems.doc(itemId).delete()));
-      deletedItemIds.clear();
-      localStorage.setItem(deletedKey, '[]');
-    }
     if (stopCloudSync) stopCloudSync();
     let firstSnapshot = true;
     stopCloudSync = cloudItems.onSnapshot((snapshot) => {
       if (!snapshot.empty) {
         items = snapshot.docs.map((doc) => doc.data());
-        localStorage.setItem(storageKey, JSON.stringify(items));
         render();
-      } else if (firstSnapshot && items.length) {
-        saveItems();
-      }
+      } else if (firstSnapshot) items = [];
       firstSnapshot = false;
     }, () => showToast('クラウド同期に失敗しました'));
   });
@@ -194,8 +177,8 @@ $('#addButton').addEventListener('click', openNewItemForm);
 $('#emptyAddButton').addEventListener('click', openNewItemForm);
 document.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => closeModal(`#${button.dataset.close}`)));
 document.querySelectorAll('.filter-tab').forEach((tab) => tab.addEventListener('click', () => { activeFilter = tab.dataset.filter; document.querySelectorAll('.filter-tab').forEach((button) => button.classList.toggle('is-active', button === tab)); render(); }));
-itemList.addEventListener('click', async (event) => { const editButton = event.target.closest('.edit-item'); if (editButton) { const item = items.find((entry) => entry.id === Number(editButton.dataset.id)); if (item) { editingItemId = item.id; editingImage = item.image || ''; $('#itemForm').elements.image.value = ''; $('#formTitle').textContent = 'アイテムを編集'; $('#formSubmit').textContent = '変更を保存'; $('#itemForm').elements.name.value = item.name; $('#itemForm').elements.location.value = item.location; $('#itemForm').elements.status.value = item.status === 'good' || item.status === 'attention' ? 'storage' : item.status; $('#itemForm').elements.code.value = item.code; $('#itemForm').elements.memo.value = item.memo || ''; openModal('#formModal'); } return; } const codeButton = event.target.closest('.code-item'); if (codeButton) { const item = items.find((entry) => entry.id === Number(codeButton.dataset.id)); if (item) openCodeModal(item); return; } const button = event.target.closest('.delete-item'); if (!button) return; const itemId = Number(button.dataset.id); deletedItemIds.add(String(itemId)); localStorage.setItem(deletedKey, JSON.stringify([...deletedItemIds])); items = items.filter((item) => item.id !== itemId); localStorage.setItem(storageKey, JSON.stringify(items)); render(); if (cloudUser && cloudItems) { cloudWriteQueue = cloudWriteQueue.then(() => cloudItems.doc(String(itemId)).delete()).catch(() => showToast('クラウドから削除できませんでした')); await cloudWriteQueue; } showToast('アイテムを削除しました'); });
-$('#itemForm').addEventListener('submit', async (event) => { event.preventDefault(); const data = new FormData(event.target); const id = editingItemId || Date.now(); const file = data.get('image'); try { const image = file && file.size > 0 ? await readImage(file) : editingImage; const updated = { id, name: data.get('name').trim(), location: data.get('location').trim(), code: data.get('code').trim() || `STOCK-${id}`, status: data.get('status') || 'storage', image, memo: data.get('memo').trim() }; const nextItems = editingItemId ? items.map((item) => item.id === editingItemId ? updated : item) : [updated, ...items]; saveItems(nextItems); items = nextItems; closeModal('#formModal'); render(); editingItemId = null; editingImage = ''; showToast('アイテムを保存しました'); } catch (error) { showToast(error.name === 'QuotaExceededError' ? '保存容量が不足しています。画像を削除してから試してください' : '画像を読み込めませんでした。JPEGやPNGで試してください'); } });
+itemList.addEventListener('click', async (event) => { const editButton = event.target.closest('.edit-item'); if (editButton) { const item = items.find((entry) => entry.id === Number(editButton.dataset.id)); if (item) { editingItemId = item.id; editingImage = item.image || ''; $('#itemForm').elements.image.value = ''; $('#formTitle').textContent = 'アイテムを編集'; $('#formSubmit').textContent = '変更を保存'; $('#itemForm').elements.name.value = item.name; $('#itemForm').elements.location.value = item.location; $('#itemForm').elements.status.value = item.status === 'good' || item.status === 'attention' ? 'storage' : item.status; $('#itemForm').elements.code.value = item.code; $('#itemForm').elements.memo.value = item.memo || ''; openModal('#formModal'); } return; } const codeButton = event.target.closest('.code-item'); if (codeButton) { const item = items.find((entry) => entry.id === Number(codeButton.dataset.id)); if (item) openCodeModal(item); return; } const button = event.target.closest('.delete-item'); if (!button) return; if (!cloudUser || !cloudItems) { showToast('Firebaseにログインしてください'); return; } const itemId = Number(button.dataset.id); items = items.filter((item) => item.id !== itemId); render(); cloudWriteQueue = cloudWriteQueue.then(() => cloudItems.doc(String(itemId)).delete()).catch(() => showToast('Firebaseから削除できませんでした')); await cloudWriteQueue; showToast('アイテムを削除しました'); });
+$('#itemForm').addEventListener('submit', async (event) => { event.preventDefault(); if (!cloudUser || !cloudItems) { showToast('登録にはFirebaseログインが必要です'); return; } const data = new FormData(event.target); const id = editingItemId || Date.now(); const file = data.get('image'); try { const image = file && file.size > 0 ? await readImage(file) : editingImage; const updated = { id, name: data.get('name').trim(), location: data.get('location').trim(), code: data.get('code').trim() || `STOCK-${id}`, status: data.get('status') || 'storage', image, memo: data.get('memo').trim() }; const nextItems = editingItemId ? items.map((item) => item.id === editingItemId ? updated : item) : [updated, ...items]; await saveItems(nextItems); items = nextItems; closeModal('#formModal'); render(); editingItemId = null; editingImage = ''; showToast('アイテムを保存しました'); } catch (error) { showToast(error.name === 'QuotaExceededError' ? 'Firestoreの保存容量制限を超えました。画像を小さくしてください' : '画像またはFirestoreへの保存に失敗しました'); } });
 function readImage(file) { return new Promise((resolve, reject) => { const image = new Image(); const reader = new FileReader(); reader.onload = () => { image.onload = () => { const scale = Math.min(1, 640 / Math.max(image.naturalWidth, image.naturalHeight)); const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale)); canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height); resolve(canvas.toDataURL('image/jpeg', 0.6)); }; image.onerror = reject; image.src = reader.result; }; reader.onerror = reject; reader.readAsDataURL(file); }); }
 document.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('#searchInput').focus(); } if (event.key === 'Escape') { closeModal('#formModal'); closeModal('#scannerModal'); } });
 render();
